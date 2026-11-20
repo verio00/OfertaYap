@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, test]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificacion:
+    name: Lint, tipos, pruebas (mocks) y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # Pruebas unitarias y de componentes con Supabase simulado: no usan credenciales.
+      - run: npm test
+      # El build no necesita credenciales: Supabase solo se consulta en tiempo de ejecución.
+      - run: npm run build
+
+  integracion-supabase:
+    name: Integración real con Supabase (opcional)
+    needs: verificacion
+    # Solo se ejecuta si se define la variable de repositorio RUN_SUPABASE_INTEGRATION=true
+    # y los secretos de un proyecto Supabase de DESARROLLO (nunca producción).
+    if: ${{ vars.RUN_SUPABASE_INTEGRATION == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_DEV_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_DEV_PUBLISHABLE_KEY }}
